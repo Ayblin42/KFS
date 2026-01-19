@@ -1,0 +1,428 @@
+================================================================================
+            KFS1 - EXPLICATIONS POUR DÉBUTANTS (VERSION SIMPLE)
+================================================================================
+
+Salut ! Ce document explique le projet KFS1 avec des mots simples.
+Pas de panique, on va tout comprendre ensemble.
+
+================================================================================
+                    C'EST QUOI UN KERNEL ? (LE NOYAU)
+================================================================================
+
+Imagine ton ordinateur comme une entreprise :
+
+    +------------------------------------------+
+    |           APPLICATIONS                   |  <- Les employés
+    |   (Firefox, Word, Spotify, jeux...)      |     (font leur travail)
+    +------------------------------------------+
+                      |
+                      v
+    +------------------------------------------+
+    |              KERNEL                      |  <- Le manager
+    |   (Linux, Windows NT, notre KFS...)      |     (organise tout)
+    +------------------------------------------+
+                      |
+                      v
+    +------------------------------------------+
+    |             MATÉRIEL                     |  <- Les outils
+    |   (CPU, RAM, disque, écran...)           |     (font le vrai travail)
+    +------------------------------------------+
+
+Le KERNEL (noyau) c'est le chef d'orchestre :
+- Il décide qui utilise le CPU et quand
+- Il gère la mémoire (qui a droit à quoi)
+- Il parle au matériel (écran, clavier, disque...)
+- Il protège les programmes les uns des autres
+
+Sans kernel = chaos total. Les programmes se marcheraient dessus.
+
+EXEMPLE CONCRET :
+Tu ouvres Chrome et Spotify en même temps.
+Le kernel s'assure que :
+- Les deux ont assez de mémoire
+- Ils passent chacun leur tour sur le CPU
+- Spotify peut accéder à la carte son
+- Chrome peut accéder à la carte réseau
+- Aucun des deux ne peut lire la mémoire de l'autre
+
+================================================================================
+                    C'EST QUOI UN CROSS-COMPILER ?
+================================================================================
+
+ANALOGIE DU CHEF CUISINIER :
+----------------------------
+
+Tu es un chef français dans une cuisine française.
+Normalement, tu fais des plats français pour des Français.
+
+Mais on te demande de préparer un repas japonais,
+qui sera mangé au Japon, avec des baguettes.
+
+Tu dois adapter ta façon de cuisiner pour que le plat
+fonctionne LÀ-BAS, pas ici.
+
+C'EST PAREIL EN INFORMATIQUE :
+------------------------------
+
+Compilateur NORMAL (gcc sur ton Linux) :
+- Il cuisine pour TON système
+- Le plat (programme) marche sur TON Linux
+- Il utilise les ingrédients de TON système (libc, etc.)
+
+CROSS-COMPILER (i686-elf-gcc) :
+- Il cuisine pour UN AUTRE système (ou pas de système du tout)
+- Le plat (kernel) marchera sur du "bare metal" (machine nue)
+- Il n'utilise AUCUN ingrédient externe
+
+POURQUOI ON EN A BESOIN ?
+-------------------------
+
+Notre kernel ne peut pas dépendre de Linux car :
+- Il n'y a PAS de Linux quand notre kernel démarre
+- Notre kernel EST le système d'exploitation
+- C'est comme demander à un bébé de s'accoucher lui-même
+
+Donc on compile SUR Linux, mais POUR une machine sans OS.
+
+LE NOM EXPLIQUÉ :
+-----------------
+i686-elf-gcc
+  |    |   |
+  |    |   +-- gcc : le compilateur GNU
+  |    +------ elf : format de fichier (comme .exe mais pour Unix)
+  +----------- i686 : processeur Intel 32-bit (Pentium et après)
+
+================================================================================
+                COMMENT UN ORDINATEUR DÉMARRE ? (BOOT)
+================================================================================
+
+Quand tu appuies sur le bouton power :
+
+ÉTAPE 1 : BIOS (le réveil)
+--------------------------
+"Hein ? Quoi ? Oh, on m'allume..."
+- Le BIOS se réveille
+- Il vérifie que tout le matériel fonctionne
+- Il cherche un disque avec un OS dessus
+
+ÉTAPE 2 : BOOTLOADER / GRUB (le majordome)
+------------------------------------------
+"Bien, monsieur. Je vais chercher votre système."
+- GRUB est chargé depuis le disque
+- Il affiche un menu (si plusieurs OS)
+- Il charge le kernel en mémoire
+- Il prépare l'environnement
+
+ÉTAPE 3 : KERNEL (le patron arrive)
+-----------------------------------
+"Je prends les commandes !"
+- Notre code dans boot.s s'exécute
+- Il initialise la stack (pile de données)
+- Il appelle kernel_main()
+- Notre kernel affiche "42"
+
+C'est comme une course de relais :
+BIOS → GRUB → boot.s → kernel_main()
+
+================================================================================
+                    C'EST QUOI MULTIBOOT ?
+================================================================================
+
+PROBLÈME :
+Chaque kernel était chargé différemment.
+Chaque bootloader avait sa propre méthode.
+C'était le bordel.
+
+SOLUTION - MULTIBOOT :
+Un "contrat" standard entre bootloader et kernel.
+
+C'est comme une prise électrique universelle :
+- Tous les appareils utilisent la même prise
+- Toutes les prises acceptent tous les appareils
+
+NOTRE HEADER MULTIBOOT (dans boot.s) :
+--------------------------------------
+C'est notre "badge d'entrée" qui dit :
+"Salut GRUB ! Je suis un kernel multiboot valide !"
+
+Le nombre magique 0x1BADB002 c'est comme un mot de passe.
+GRUB vérifie ce nombre pour être sûr qu'il charge bien un kernel.
+
+================================================================================
+                    LES FICHIERS DU PROJET EXPLIQUÉS
+================================================================================
+
+Pense au projet comme une voiture :
+
+src/boot.s ............ Le démarreur (met le moteur en route)
+src/kernel.c .......... Le moteur (le coeur du système)
+src/vga.c ............. Le tableau de bord (affichage)
+include/kernel.h ...... Le manuel technique (définitions)
+include/vga.h ......... Le manuel du tableau de bord
+linker.ld ............. Le plan d'assemblage (où mettre chaque pièce)
+Makefile .............. L'usine (comment construire la voiture)
+grub.cfg .............. La clé de contact (dit à GRUB quoi démarrer)
+
+================================================================================
+                        BOOT.S - LE DÉMARREUR
+================================================================================
+
+C'est de l'assembleur x86. Ça ressemble à du charabia mais c'est simple :
+
+PARTIE 1 - LE BADGE MULTIBOOT :
+-------------------------------
+.set MAGIC, 0x1BADB002      <- "Je suis un kernel multiboot"
+.set FLAGS, ALIGN | MEMINFO <- "Je veux ces options"
+.set CHECKSUM, -(MAGIC+FLAGS) <- Vérification mathématique
+
+PARTIE 2 - LA STACK :
+---------------------
+stack_bottom:
+.skip 16384                 <- Réserve 16 KB de mémoire
+stack_top:
+
+La STACK (pile) c'est quoi ?
+
+Imagine une pile d'assiettes :
+- Tu poses une assiette (tu appelles une fonction)
+- Tu poses une autre (fonction dans fonction)
+- Tu retires la dernière (la fonction retourne)
+
+La stack stocke :
+- Les variables locales
+- L'adresse de retour des fonctions
+- Les paramètres passés aux fonctions
+
+PARTIE 3 - LE DÉMARRAGE :
+-------------------------
+_start:
+    mov $stack_top, %esp    <- "Ma pile commence ICI"
+    call kernel_main        <- "Appelle le vrai code"
+    cli                     <- "Désactive les interruptions"
+    hlt                     <- "Mets le CPU en pause"
+    jmp 1b                  <- "Si on revient, reboucle"
+
+================================================================================
+                    KERNEL.C - LE MOTEUR
+================================================================================
+
+C'est le fichier principal. Regarde comme c'est simple :
+
+void kernel_main(void)
+{
+    terminal_initialize();        // Efface l'écran
+    terminal_writestring("42");   // Affiche "42"
+
+    while (1)
+        __asm__ volatile ("hlt"); // Dort pour toujours
+}
+
+C'est tout ! Notre kernel :
+1. Efface l'écran
+2. Affiche "42"
+3. Dort
+
+Pour l'instant c'est basique, mais c'est la BASE de tout OS.
+
+================================================================================
+                    VGA.C - L'ÉCRAN
+================================================================================
+
+COMMENT ÇA MARCHE ?
+-------------------
+
+L'écran en mode texte c'est juste de la mémoire !
+
+Adresse 0xB8000 = premier caractère de l'écran (coin haut-gauche)
+Adresse 0xB8002 = deuxième caractère
+etc.
+
+C'est une grille de 80 colonnes x 25 lignes = 2000 cases
+
+    Colonne: 0  1  2  3  4  ...  79
+           +--+--+--+--+--+    +--+
+    Ligne 0| H| e| l| l| o|    |  |
+           +--+--+--+--+--+    +--+
+    Ligne 1|  |  |  |  |  |    |  |
+           +--+--+--+--+--+    +--+
+    ...
+           +--+--+--+--+--+    +--+
+    Ligne 24|  |  |  |  |  |    |  |
+           +--+--+--+--+--+    +--+
+
+CHAQUE CASE = 2 OCTETS :
+------------------------
+
+Octet 1 : Le caractère (code ASCII)
+Octet 2 : La couleur
+
+Exemple pour afficher 'A' en vert sur fond noir :
+- Caractère : 'A' = 0x41
+- Couleur   : vert(2) sur noir(0) = 0x02
+- On écrit  : 0x0241 à l'adresse mémoire
+
+Notre code utilise 0x07 = gris clair sur noir.
+
+================================================================================
+                    LINKER.LD - LE PLAN
+================================================================================
+
+Le linker c'est celui qui assemble toutes les pièces.
+
+Il prend : boot.o + kernel.o + vga.o
+Il produit : kfs.bin (le kernel final)
+
+Le script linker.ld lui dit :
+
+"Le kernel sera chargé à l'adresse 2 MB"
+    . = 2M;
+
+"Mets d'abord le header multiboot, puis le code"
+    .text : { *(.multiboot) *(.text) }
+
+"Ensuite les données"
+    .rodata : { *(.rodata) }
+    .data   : { *(.data) }
+    .bss    : { *(.bss) }
+
+POURQUOI 2 MB ?
+---------------
+Les premiers 1 MB sont réservés :
+- 0x00000 - 0x9FFFF : Mémoire conventionnelle (BIOS)
+- 0xA0000 - 0xBFFFF : Mémoire vidéo (VGA)
+- 0xC0000 - 0xFFFFF : ROM BIOS
+
+Donc on met notre kernel après, à 2 MB, pour être tranquille.
+
+================================================================================
+                    MAKEFILE - L'USINE
+================================================================================
+
+Le Makefile c'est la recette de fabrication.
+
+Au lieu de taper :
+    i686-elf-gcc -c src/kernel.c -o obj/kernel.o
+    i686-elf-as src/boot.s -o obj/boot.o
+    i686-elf-gcc -T linker.ld obj/*.o -o kfs.bin
+    ... (plein de commandes)
+
+Tu tapes juste :
+    make
+
+Et tout se fait automatiquement !
+
+COMMANDES UTILES :
+------------------
+make        -> Compile tout
+make run    -> Compile + lance dans QEMU (émulateur)
+make clean  -> Supprime les fichiers temporaires
+make fclean -> Supprime TOUT (repart de zéro)
+make re     -> fclean + make (recompile tout)
+
+================================================================================
+                    RÉSUMÉ DU CHEMINEMENT
+================================================================================
+
+ÉTAPE 1 : Installer les outils
+------------------------------
+- Cross-compiler (i686-elf-gcc)
+- QEMU (émulateur pour tester)
+- GRUB (pour créer l'ISO bootable)
+
+ÉTAPE 2 : Écrire le code de boot (boot.s)
+-----------------------------------------
+- Header multiboot (le badge)
+- Réserver la stack (la pile)
+- Appeler kernel_main
+
+ÉTAPE 3 : Écrire les types de base (kernel.h)
+--------------------------------------------
+- uint8_t, uint16_t, uint32_t (types d'entiers)
+- size_t (taille)
+- strlen (longueur d'une chaîne)
+
+ÉTAPE 4 : Écrire le driver écran (vga.c)
+----------------------------------------
+- Effacer l'écran
+- Afficher un caractère
+- Afficher une chaîne
+
+ÉTAPE 5 : Écrire le kernel (kernel.c)
+-------------------------------------
+- Initialiser l'écran
+- Afficher "42"
+
+ÉTAPE 6 : Écrire le linker script (linker.ld)
+---------------------------------------------
+- Dire où placer le kernel en mémoire
+- Organiser les sections
+
+ÉTAPE 7 : Écrire le Makefile
+----------------------------
+- Automatiser la compilation
+
+ÉTAPE 8 : Tester !
+------------------
+    make run
+
+Si tu vois "42" sur l'écran... BRAVO ! Tu as fait un kernel !
+
+================================================================================
+                    QUESTIONS FRÉQUENTES
+================================================================================
+
+Q: Pourquoi "42" ?
+R: C'est la réponse à la grande question sur la vie, l'univers et le reste.
+   (Référence au "Guide du voyageur galactique")
+   Et c'est aussi le nom de l'école 42 !
+
+Q: Pourquoi le kernel boucle à la fin ?
+R: Parce qu'il n'a nulle part où retourner !
+   S'il "retournait", il irait n'importe où en mémoire = crash.
+
+Q: C'est quoi hlt ?
+R: "Halt" = Arrête. Le CPU se met en pause jusqu'à la prochaine interruption.
+   C'est mieux que de boucler à vide (économise l'énergie).
+
+Q: Pourquoi on désactive les interruptions (cli) ?
+R: Parce qu'on n'a pas encore de gestionnaire d'interruptions.
+   Si une interruption arrive, le CPU ne saura pas quoi faire = crash.
+
+Q: Je peux ajouter des fonctionnalités ?
+R: Oui ! C'est le but ! Prochaines étapes :
+   - Support du clavier
+   - Couleurs
+   - Printf
+   - Gestion de la mémoire
+   - Processus
+   - Et bien plus...
+
+================================================================================
+                    POUR ALLER PLUS LOIN
+================================================================================
+
+OSDev Wiki : https://wiki.osdev.org
+- LA référence pour le développement OS
+- Tutoriels, documentation, forum
+
+"Operating Systems: Three Easy Pieces"
+- Livre gratuit en ligne
+- Explique les concepts OS
+
+Projets suivants (KFS2, KFS3...) :
+- Interruptions
+- Mémoire (pagination)
+- Processus
+- Système de fichiers
+
+================================================================================
+        FÉLICITATIONS ! TU AS COMPRIS LES BASES DU DEV KERNEL !
+================================================================================
+
+Ce n'est que le début. Un kernel complet c'est des millions de lignes.
+Mais chaque kernel a commencé exactement comme ça : un "Hello World".
+
+Le tien affiche "42". C'est déjà énorme.
+
+Bonne continuation !
+================================================================================

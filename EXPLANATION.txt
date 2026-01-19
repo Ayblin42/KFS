@@ -1,0 +1,416 @@
+================================================================================
+                    KFS1 - KERNEL FROM SCRATCH - DOCUMENTATION
+================================================================================
+
+Ce document explique en détail chaque composant du projet KFS1, le cheminement
+pour le réaliser, et les concepts fondamentaux du développement kernel.
+
+================================================================================
+                            TABLE DES MATIÈRES
+================================================================================
+
+1. Qu'est-ce qu'un Kernel ?
+2. Le Cross-Compiler
+3. Le Boot Process (Processus de démarrage)
+4. Multiboot et GRUB
+5. Structure du Projet
+6. Les Fichiers Sources en Détail
+7. Le Linker Script
+8. Le Makefile
+9. La Mémoire VGA
+10. Cheminement de Réalisation
+
+================================================================================
+                        1. QU'EST-CE QU'UN KERNEL ?
+================================================================================
+
+Un kernel (noyau) est le composant central d'un système d'exploitation. C'est
+le premier programme chargé en mémoire après le bootloader, et il reste en
+mémoire pendant toute la durée de fonctionnement de l'ordinateur.
+
+RÔLES DU KERNEL :
+-----------------
+- Gestion de la mémoire (allocation, protection, pagination)
+- Gestion des processus (création, ordonnancement, terminaison)
+- Gestion des périphériques (drivers)
+- Gestion des fichiers (systèmes de fichiers)
+- Communication inter-processus
+- Sécurité et permissions
+
+TYPES DE KERNELS :
+------------------
+1. Monolithique : Tout le code du kernel s'exécute dans un seul espace
+   (Linux, BSD)
+
+2. Micro-kernel : Seules les fonctions essentielles sont dans le kernel,
+   le reste tourne en espace utilisateur (Minix, QNX)
+
+3. Hybride : Compromis entre les deux (Windows NT, macOS)
+
+Notre KFS1 est un kernel monolithique minimaliste.
+
+================================================================================
+                        2. LE CROSS-COMPILER
+================================================================================
+
+DÉFINITION :
+------------
+Un cross-compiler est un compilateur qui produit du code exécutable pour une
+plateforme différente de celle sur laquelle il s'exécute.
+
+POURQUOI EN AVONS-NOUS BESOIN ?
+-------------------------------
+Notre kernel doit être "freestanding" (autonome), c'est-à-dire qu'il ne peut
+pas dépendre de bibliothèques système (libc, etc.) car il EST le système.
+
+Le compilateur natif de votre Linux (gcc) produit des binaires qui :
+- Sont liés à la glibc
+- Utilisent le format ELF Linux
+- Dépendent du loader dynamique
+- Supposent l'existence d'un OS
+
+Notre cross-compiler (i686-elf-gcc) produit des binaires :
+- Sans aucune dépendance système
+- Au format ELF générique
+- Pour l'architecture i386 (32-bit x86)
+- "Bare metal" (directement sur le matériel)
+
+NOMENCLATURE :
+--------------
+i686-elf-gcc se décompose ainsi :
+- i686    : Architecture cible (Intel 686, compatible Pentium Pro+)
+- elf     : Format de sortie (Executable and Linkable Format)
+- gcc     : Le compilateur GNU
+
+INSTALLATION :
+--------------
+Le cross-compiler doit être compilé depuis les sources ou installé via
+le script install_cross_compiler.sh fourni.
+
+================================================================================
+                    3. LE BOOT PROCESS (PROCESSUS DE DÉMARRAGE)
+================================================================================
+
+Voici ce qui se passe quand vous allumez un PC :
+
+1. POWER ON
+   └─> Le CPU commence à exécuter le code à l'adresse 0xFFFFFFF0
+
+2. BIOS/UEFI
+   └─> POST (Power-On Self-Test)
+   └─> Détection du matériel
+   └─> Recherche d'un périphérique bootable
+   └─> Charge le MBR (512 premiers octets) en mémoire
+
+3. BOOTLOADER (GRUB dans notre cas)
+   └─> Chargé par le BIOS
+   └─> Passe en mode protégé (32-bit)
+   └─> Charge le kernel en mémoire
+   └─> Configure l'environnement multiboot
+   └─> Saute vers le point d'entrée du kernel (_start)
+
+4. KERNEL (notre code)
+   └─> boot.s : Initialise la stack
+   └─> boot.s : Appelle kernel_main()
+   └─> kernel.c : Initialise le terminal VGA
+   └─> kernel.c : Affiche "42"
+   └─> kernel.c : Boucle infinie (hlt)
+
+================================================================================
+                        4. MULTIBOOT ET GRUB
+================================================================================
+
+MULTIBOOT :
+-----------
+Multiboot est une spécification qui définit une interface standard entre
+un bootloader et un kernel. Cela permet à n'importe quel bootloader
+compatible de charger n'importe quel kernel compatible.
+
+LE HEADER MULTIBOOT (dans boot.s) :
+-----------------------------------
+.set MAGIC,    0x1BADB002       # Nombre magique identifiant multiboot
+.set FLAGS,    ALIGN | MEMINFO  # Options demandées au bootloader
+.set CHECKSUM, -(MAGIC + FLAGS) # Vérification d'intégrité
+
+Ce header DOIT être dans les 8192 premiers octets du kernel et aligné
+sur 4 octets.
+
+FLAGS expliqués :
+- ALIGN (bit 0)   : Aligner les modules chargés sur des pages (4KB)
+- MEMINFO (bit 1) : Fournir une carte mémoire au kernel
+
+GRUB :
+------
+GRUB (GRand Unified Bootloader) est le bootloader le plus utilisé sur Linux.
+Il supporte Multiboot et peut charger notre kernel.
+
+Configuration (grub.cfg) :
+- menuentry : Définit une entrée dans le menu GRUB
+- multiboot : Indique le chemin vers le kernel multiboot
+- boot      : Lance le boot
+
+================================================================================
+                        5. STRUCTURE DU PROJET
+================================================================================
+
+kfs1/
+├── src/                    # Code source
+│   ├── boot.s              # Code assembleur de boot (point d'entrée)
+│   ├── kernel.c            # Code principal du kernel
+│   └── vga.c               # Driver d'affichage VGA
+│
+├── include/                # Headers
+│   ├── kernel.h            # Types de base et prototypes
+│   └── vga.h               # Définitions VGA
+│
+├── Makefile                # Règles de compilation
+├── linker.ld               # Script de linkage
+├── grub.cfg                # Configuration GRUB
+│
+├── create_image.sh         # Script pour créer une image disque
+└── install_cross_compiler.sh # Script d'installation du cross-compiler
+
+================================================================================
+                    6. LES FICHIERS SOURCES EN DÉTAIL
+================================================================================
+
+----------------------
+boot.s (Assembleur x86)
+----------------------
+
+SECTION .multiboot :
+    Contient le header multiboot pour être reconnu par GRUB.
+
+SECTION .bss :
+    Réserve 16 KB pour la stack (pile). La stack est essentielle car :
+    - Elle stocke les variables locales
+    - Elle gère les appels de fonctions (adresses de retour)
+    - Elle passe les paramètres aux fonctions
+
+SECTION .text :
+    _start est le point d'entrée (défini dans linker.ld).
+
+    Instructions :
+    1. mov $stack_top, %esp  : Initialise le pointeur de stack
+    2. call kernel_main      : Appelle la fonction C principale
+    3. cli                   : Désactive les interruptions
+    4. hlt                   : Met le CPU en pause
+    5. jmp 1b                : Boucle infinie (sécurité)
+
+----------------------
+kernel.c
+----------------------
+
+strlen() :
+    Fonction basique qui compte les caractères d'une chaîne.
+    Nécessaire car nous n'avons pas accès à la libc.
+
+kernel_main() :
+    Point d'entrée C du kernel.
+    1. Initialise le terminal VGA
+    2. Affiche "42"
+    3. Boucle infinie avec hlt (économie d'énergie)
+
+----------------------
+vga.c
+----------------------
+
+Le driver VGA en mode texte.
+
+Variables statiques :
+- terminal_row    : Ligne courante du curseur
+- terminal_column : Colonne courante du curseur
+- terminal_buffer : Pointeur vers la mémoire VGA (0xB8000)
+
+terminal_initialize() :
+    Remplit l'écran avec des espaces (efface l'écran).
+
+terminal_putchar() :
+    Affiche un caractère à la position courante.
+    Gère le retour à la ligne ('\n') et le dépassement de ligne.
+
+terminal_writestring() :
+    Affiche une chaîne caractère par caractère.
+
+================================================================================
+                        7. LE LINKER SCRIPT
+================================================================================
+
+Le linker script (linker.ld) indique au linker comment organiser les
+sections du binaire final.
+
+ENTRY(_start) :
+    Définit le point d'entrée du programme.
+
+. = 2M :
+    Le kernel sera chargé à l'adresse 2 MB (0x200000).
+    Les premiers 1 MB sont réservés pour le BIOS, la mémoire VGA, etc.
+
+SECTIONS :
+
+.text (code exécutable) :
+    - .multiboot en premier (CRUCIAL - doit être dans les 8KB initiaux)
+    - .text ensuite (le code)
+
+.rodata (read-only data) :
+    Données en lecture seule (constantes, chaînes littérales).
+
+.data (données initialisées) :
+    Variables globales initialisées.
+
+.bss (données non-initialisées) :
+    Variables globales non-initialisées (incluant notre stack).
+    Cette section n'occupe pas d'espace dans le binaire.
+
+BLOCK(4K) et ALIGN(4K) :
+    Aligne chaque section sur des pages de 4 KB.
+    Important pour la pagination mémoire future.
+
+================================================================================
+                        8. LE MAKEFILE
+================================================================================
+
+VARIABLES :
+-----------
+CC = i686-elf-gcc    : Cross-compiler C
+AS = i686-elf-as     : Assembleur
+LD = i686-elf-gcc    : Linker (via GCC)
+
+FLAGS DE COMPILATION (CFLAGS) :
+-------------------------------
+-std=gnu99          : Standard C99 avec extensions GNU
+-ffreestanding      : Environnement freestanding (pas d'OS)
+-fno-builtin        : N'utilise pas les fonctions builtin de GCC
+-fno-stack-protector: Désactive la protection de stack (pas de __stack_chk)
+-nostdlib           : Ne lie pas avec la bibliothèque standard
+-nodefaultlibs      : Ne lie pas avec les bibliothèques par défaut
+-O2                 : Optimisation niveau 2
+-Wall -Wextra       : Active tous les warnings
+
+FLAGS DE LINKAGE (LDFLAGS) :
+----------------------------
+-T linker.ld        : Utilise notre script de linkage
+-ffreestanding      : Mode freestanding
+-nostdlib           : Pas de bibliothèque standard
+-lgcc               : Lie avec libgcc (fonctions intrinsèques du compilateur)
+
+TARGETS :
+---------
+make        : Compile le kernel (kfs.bin)
+make iso    : Crée une image ISO bootable avec GRUB
+make run    : Compile + crée ISO + lance QEMU
+make verify : Vérifie la conformité multiboot
+make clean  : Supprime les fichiers objets
+make fclean : Supprime tout (objets + binaires + ISO)
+make re     : Recompile tout depuis zéro
+
+================================================================================
+                        9. LA MÉMOIRE VGA
+================================================================================
+
+ADRESSE DE BASE : 0xB8000
+-------------------------
+En mode texte VGA, l'écran est mappé en mémoire à l'adresse 0xB8000.
+C'est du "memory-mapped I/O" : écrire à cette adresse modifie l'écran.
+
+DIMENSIONS : 80x25
+------------------
+- 80 colonnes
+- 25 lignes
+- Total : 2000 caractères
+
+FORMAT D'UN CARACTÈRE (16 bits) :
+---------------------------------
+Chaque caractère occupe 2 octets :
+
+    Bits 0-7   : Code ASCII du caractère
+    Bits 8-11  : Couleur du texte (foreground)
+    Bits 12-14 : Couleur du fond (background)
+    Bit 15     : Clignotement (blink)
+
+COULEURS VGA (4 bits) :
+-----------------------
+0 = Noir          8 = Gris foncé
+1 = Bleu          9 = Bleu clair
+2 = Vert          A = Vert clair
+3 = Cyan          B = Cyan clair
+4 = Rouge         C = Rouge clair
+5 = Magenta       D = Magenta clair
+6 = Marron        E = Jaune
+7 = Gris clair    F = Blanc
+
+Notre code utilise 0x07 = Gris clair (7) sur Noir (0).
+
+CALCUL DE POSITION :
+--------------------
+offset = (row * 80 + column) * 2
+Ou en utilisant uint16_t* : buffer[row * 80 + column]
+
+================================================================================
+                    10. CHEMINEMENT DE RÉALISATION
+================================================================================
+
+ÉTAPE 1 : Préparation de l'environnement
+----------------------------------------
+1. Installer les outils : gcc, make, nasm/gas, qemu, grub
+2. Compiler ou installer le cross-compiler i686-elf-gcc
+3. Vérifier : i686-elf-gcc --version
+
+ÉTAPE 2 : Code de boot (boot.s)
+-------------------------------
+1. Écrire le header multiboot (MAGIC, FLAGS, CHECKSUM)
+2. Réserver l'espace pour la stack (.bss)
+3. Écrire _start : initialiser stack + appeler kernel_main
+4. Ajouter la boucle infinie de sécurité
+
+ÉTAPE 3 : Linker script (linker.ld)
+-----------------------------------
+1. Définir le point d'entrée (_start)
+2. Placer le kernel à 2MB
+3. Organiser les sections (.multiboot en premier !)
+4. Aligner sur 4KB pour la pagination future
+
+ÉTAPE 4 : Types de base (kernel.h)
+----------------------------------
+1. Définir uint8_t, uint16_t, uint32_t, size_t
+2. Déclarer les prototypes des fonctions basiques
+
+ÉTAPE 5 : Driver VGA (vga.c/vga.h)
+----------------------------------
+1. Définir les constantes (dimensions, adresse mémoire)
+2. Implémenter terminal_initialize (efface l'écran)
+3. Implémenter terminal_putchar (affiche un caractère)
+4. Implémenter terminal_writestring (affiche une chaîne)
+
+ÉTAPE 6 : Kernel principal (kernel.c)
+-------------------------------------
+1. Implémenter strlen (nécessaire pour writestring)
+2. Écrire kernel_main : init terminal + afficher "42"
+
+ÉTAPE 7 : Makefile
+------------------
+1. Définir les variables (CC, AS, FLAGS)
+2. Règle pour compiler .c -> .o
+3. Règle pour assembler .s -> .o
+4. Règle pour linker tous les .o -> kernel.bin
+5. Règle pour créer l'ISO avec GRUB
+
+ÉTAPE 8 : Test
+--------------
+1. make : Compiler le kernel
+2. make verify : Vérifier multiboot
+3. make run : Tester dans QEMU
+4. Vérifier que "42" s'affiche
+
+================================================================================
+                            RESSOURCES
+================================================================================
+
+- OSDev Wiki : https://wiki.osdev.org
+- Multiboot Specification : https://www.gnu.org/software/grub/manual/multiboot/
+- Intel x86 Manuals : https://software.intel.com/en-us/articles/intel-sdm
+- GCC Cross-Compiler : https://wiki.osdev.org/GCC_Cross-Compiler
+
+================================================================================
+                        FIN DU DOCUMENT
+================================================================================
