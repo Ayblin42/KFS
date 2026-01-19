@@ -8,11 +8,11 @@ IMG_NAME="kfs.img"
 IMG_SIZE=8  # MB
 MOUNT_POINT="/tmp/kfs_mount"
 
-# Check if running as root
-if [ "$EUID" -ne 0 ]; then
-    echo "Please run with sudo"
-    exit 1
-fi
+# # Check if running as root
+# if [ "$EUID" -ne 0 ]; then
+#     echo "Please run with sudo"
+#     exit 1
+# fi
 
 # Clean previous image
 rm -f "$IMG_NAME"

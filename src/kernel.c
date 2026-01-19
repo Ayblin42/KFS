@@ -13,7 +13,4 @@ void kernel_main(void)
 {
     terminal_initialize();
     terminal_writestring("42");
-
-    while (1)
-        __asm__ volatile ("hlt");
 }

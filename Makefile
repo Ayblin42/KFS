@@ -1,103 +1,63 @@
 # **************************************************************************** #
-#                                KFS - Kernel From Scratch                     #
+#                            KFS - Kernel From Scratch                         #
 # **************************************************************************** #
 
-NAME		= kfs.bin
-ISO			= kfs.iso
-
-# Directories
-SRC_DIR		= src
-INC_DIR		= include
-OBJ_DIR		= obj
-ISO_DIR		= iso
-
-# Docker
-DOCKER_IMG	= kfs
-DOCKER_RUN	= docker run --rm -v "$$(pwd)":/kfs $(DOCKER_IMG)
-
-# Compiler (gcc -m32, pas besoin de cross-compiler)
-CC			= gcc
-AS			= as
-LD			= ld
-
-# Sources
-C_SRCS		= $(wildcard $(SRC_DIR)/*.c)
-ASM_SRCS	= $(wildcard $(SRC_DIR)/*.s)
-C_OBJS		= $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(C_SRCS))
-ASM_OBJS	= $(patsubst $(SRC_DIR)/%.s,$(OBJ_DIR)/%.o,$(ASM_SRCS))
-OBJS		= $(ASM_OBJS) $(C_OBJS)
-
-# Flags (requis par le sujet)
-CFLAGS		= -m32 \
-			  -std=gnu99 \
-			  -ffreestanding \
-			  -fno-builtin \
-			  -fno-stack-protector \
-			  -nostdlib \
-			  -nodefaultlibs \
-			  -O2 \
-			  -Wall \
-			  -Wextra \
-			  -I$(INC_DIR)
-
-ASFLAGS		= --32
-LDFLAGS		= -m elf_i386 -T linker.ld -nostdlib
+NAME        = kfs.bin
+ISO         = kfs.iso
 
 # **************************************************************************** #
-#                                    Regles                                    #
+#                                 CONFIGURATION                                #
 # **************************************************************************** #
 
-.PHONY: all clean fclean re docker iso run verify
+SRC_DIR     = src
+INC_DIR     = include
+OBJ_DIR     = obj
+ISO_DIR     = iso
 
-# Compilation via Docker (commande par defaut)
-all: docker
+CC          = gcc
+AS          = as
+LD          = ld
 
-# Build l'image Docker (une seule fois)
-docker-build:
-	@docker build -t $(DOCKER_IMG) . > /dev/null 2>&1 || docker build -t $(DOCKER_IMG) .
-	@echo "Image Docker $(DOCKER_IMG) prete"
+CFLAGS      = -m32 -std=gnu99 -ffreestanding -fno-builtin \
+              -fno-stack-protector -nostdlib -nodefaultlibs \
+              -O2 -Wall -Wextra -I$(INC_DIR)
+ASFLAGS     = --32
+LDFLAGS     = -m elf_i386 -T linker.ld -nostdlib
 
-# Compile via Docker
-docker: docker-build
-	@$(DOCKER_RUN)
-	@echo "Compilation terminee: $(NAME)"
+C_SRCS      = $(wildcard $(SRC_DIR)/*.c)
+ASM_SRCS    = $(wildcard $(SRC_DIR)/*.s)
+OBJS        = $(patsubst $(SRC_DIR)/%.s,$(OBJ_DIR)/%.o,$(ASM_SRCS)) \
+              $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(C_SRCS))
 
-# Compilation locale (utilisee par Docker)
-build: $(NAME)
+# **************************************************************************** #
+#                      COMMANDES UTILISATEUR (sur l'hôte)                      #
+#                                                                              #
+#   make       → compile le kernel via Docker                                  #
+#   make iso   → compile + crée l'ISO bootable                                 #
+#   make run   → compile + crée ISO + lance QEMU                               #
+#   make clean → supprime les fichiers générés                                 #
+#                                                                              #
+# **************************************************************************** #
 
-$(OBJ_DIR):
-	@mkdir -p $(OBJ_DIR)
+DOCKER_IMG  = kfs
+DOCKER      = docker run --rm -v "$$(pwd)":/kfs $(DOCKER_IMG)
 
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.s | $(OBJ_DIR)
-	$(AS) $(ASFLAGS) $< -o $@
+.PHONY: all iso run verify clean fclean re
 
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
+all: _docker_build
+	@$(DOCKER)
+	@echo "✓ $(NAME)"
 
-$(NAME): $(OBJS)
-	$(LD) $(LDFLAGS) $(OBJS) -o $(NAME)
+iso: _docker_build
+	@$(DOCKER) make _iso
+	@echo "✓ $(ISO)"
 
-# Cree l'ISO bootable
-iso: docker-build
-	@$(DOCKER_RUN)
-	@$(DOCKER_RUN) make iso-local
-	@echo "ISO creee: $(ISO)"
-
-iso-local: $(NAME)
-	@mkdir -p $(ISO_DIR)/boot/grub
-	@cp $(NAME) $(ISO_DIR)/boot/
-	@cp grub.cfg $(ISO_DIR)/boot/grub/
-	@grub-mkrescue -o $(ISO) $(ISO_DIR) 2>/dev/null
-
-# Verifie que le kernel est multiboot compliant
-verify: docker-build
-	@$(DOCKER_RUN) grub-file --is-x86-multiboot $(NAME) && echo "Multiboot: OK"
-
-# Lance le kernel dans QEMU
 run: iso
 	qemu-system-i386 -cdrom $(ISO)
 
-# Nettoyage
+verify: _docker_build
+	@$(DOCKER) grub-file --is-x86-multiboot $(NAME) && echo "✓ Multiboot OK"
+
 clean:
 	rm -rf $(OBJ_DIR) $(ISO_DIR)
 
@@ -105,3 +65,38 @@ fclean: clean
 	rm -f $(NAME) $(ISO)
 
 re: fclean all
+
+# Build l'image Docker si nécessaire
+_docker_build:
+	@docker build -t $(DOCKER_IMG) . -q > /dev/null 2>&1 || docker build -t $(DOCKER_IMG) .
+
+# **************************************************************************** #
+#                      COMMANDES INTERNES (dans Docker)                        #
+#                                                                              #
+#   Ces cibles sont appelées automatiquement par Docker.                       #
+#   Ne pas les utiliser directement.                                           #
+#                                                                              #
+# **************************************************************************** #
+
+.PHONY: build _iso
+
+# Cible par défaut dans Docker (voir Dockerfile CMD)
+build: $(NAME)
+
+$(NAME): $(OBJS)
+	$(LD) $(LDFLAGS) $(OBJS) -o $(NAME)
+
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.s | $(OBJ_DIR)
+	$(AS) $(ASFLAGS) $< -o $@
+
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJ_DIR):
+	@mkdir -p $(OBJ_DIR)
+
+_iso: $(NAME)
+	@mkdir -p $(ISO_DIR)/boot/grub
+	@cp $(NAME) $(ISO_DIR)/boot/
+	@cp grub.cfg $(ISO_DIR)/boot/grub/
+	@grub-mkrescue -o $(ISO) $(ISO_DIR) 2>/dev/null
