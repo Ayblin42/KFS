@@ -18,8 +18,8 @@ echo ""
 
 # Dependances
 echo "[1/6] Installation des dependances..."
-sudo apt-get update
-sudo apt-get install -y build-essential bison flex libgmp3-dev libmpc-dev libmpfr-dev texinfo
+apt-get update
+apt-get install -y build-essential bison flex libgmp3-dev libmpc-dev libmpfr-dev texinfo
 
 # Creer les repertoires
 mkdir -p "$PREFIX"

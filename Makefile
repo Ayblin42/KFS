@@ -1,103 +1,107 @@
-# Kernel From Scratch 1 - Makefile
-# Following OSDev Wiki Bare Bones tutorial
+# **************************************************************************** #
+#                                KFS - Kernel From Scratch                     #
+# **************************************************************************** #
 
-# Kernel name
-NAME = kfs.bin
-ISO = kfs.iso
-IMG = kfs.img
+NAME		= kfs.bin
+ISO			= kfs.iso
 
 # Directories
-SRC_DIR = src
-INC_DIR = include
-OBJ_DIR = obj
-ISO_DIR = iso
+SRC_DIR		= src
+INC_DIR		= include
+OBJ_DIR		= obj
+ISO_DIR		= iso
 
-# Cross-compiler (as recommended by OSDev)
-CC = i686-elf-gcc
-AS = i686-elf-as
-LD = i686-elf-gcc
+# Docker
+DOCKER_IMG	= kfs
+DOCKER_RUN	= docker run --rm -v "$$(pwd)":/kfs $(DOCKER_IMG)
 
-# Source files
-C_SRCS = $(wildcard $(SRC_DIR)/*.c)
-ASM_SRCS = $(wildcard $(SRC_DIR)/*.s)
+# Compiler (gcc -m32, pas besoin de cross-compiler)
+CC			= gcc
+AS			= as
+LD			= ld
 
-# Object files
-C_OBJS = $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(C_SRCS))
-ASM_OBJS = $(patsubst $(SRC_DIR)/%.s,$(OBJ_DIR)/%.o,$(ASM_SRCS))
-OBJS = $(ASM_OBJS) $(C_OBJS)
+# Sources
+C_SRCS		= $(wildcard $(SRC_DIR)/*.c)
+ASM_SRCS	= $(wildcard $(SRC_DIR)/*.s)
+C_OBJS		= $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(C_SRCS))
+ASM_OBJS	= $(patsubst $(SRC_DIR)/%.s,$(OBJ_DIR)/%.o,$(ASM_SRCS))
+OBJS		= $(ASM_OBJS) $(C_OBJS)
 
-# Flags (as required by the subject and OSDev)
-CFLAGS = -std=gnu99 \
-         -ffreestanding \
-         -fno-builtin \
-         -fno-stack-protector \
-         -nostdlib \
-         -nodefaultlibs \
-         -O2 \
-         -Wall \
-         -Wextra \
-         -I$(INC_DIR)
+# Flags (requis par le sujet)
+CFLAGS		= -m32 \
+			  -std=gnu99 \
+			  -ffreestanding \
+			  -fno-builtin \
+			  -fno-stack-protector \
+			  -nostdlib \
+			  -nodefaultlibs \
+			  -O2 \
+			  -Wall \
+			  -Wextra \
+			  -I$(INC_DIR)
 
-ASFLAGS =
+ASFLAGS		= --32
+LDFLAGS		= -m elf_i386 -T linker.ld -nostdlib
 
-LDFLAGS = -T linker.ld \
-          -ffreestanding \
-          -O2 \
-          -nostdlib
+# **************************************************************************** #
+#                                    Regles                                    #
+# **************************************************************************** #
 
-# Phony targets
-.PHONY: all clean fclean re iso img run run-img
+.PHONY: all clean fclean re docker iso run verify
 
-# Default target
-all: $(NAME)
+# Compilation via Docker (commande par defaut)
+all: docker
 
-# Create object directory
+# Build l'image Docker (une seule fois)
+docker-build:
+	@docker build -t $(DOCKER_IMG) . > /dev/null 2>&1 || docker build -t $(DOCKER_IMG) .
+	@echo "Image Docker $(DOCKER_IMG) prete"
+
+# Compile via Docker
+docker: docker-build
+	@$(DOCKER_RUN)
+	@echo "Compilation terminee: $(NAME)"
+
+# Compilation locale (utilisee par Docker)
+build: $(NAME)
+
 $(OBJ_DIR):
-	mkdir -p $(OBJ_DIR)
+	@mkdir -p $(OBJ_DIR)
 
-# Compile C files
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-# Assemble ASM files (GNU AS syntax)
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.s | $(OBJ_DIR)
 	$(AS) $(ASFLAGS) $< -o $@
 
-# Link all objects into kernel binary
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(NAME): $(OBJS)
-	$(LD) $(LDFLAGS) $(OBJS) -o $(NAME) -lgcc
+	$(LD) $(LDFLAGS) $(OBJS) -o $(NAME)
 
-# Verify multiboot compliance
-verify: $(NAME)
-	grub-file --is-x86-multiboot $(NAME) && echo "Multiboot: OK"
+# Cree l'ISO bootable
+iso: docker-build
+	@$(DOCKER_RUN)
+	@$(DOCKER_RUN) make iso-local
+	@echo "ISO creee: $(ISO)"
 
-# Create bootable ISO with GRUB
-iso: $(NAME)
-	mkdir -p $(ISO_DIR)/boot/grub
-	cp $(NAME) $(ISO_DIR)/boot/
-	cp grub.cfg $(ISO_DIR)/boot/grub/
-	grub-mkrescue -o $(ISO) $(ISO_DIR)
+iso-local: $(NAME)
+	@mkdir -p $(ISO_DIR)/boot/grub
+	@cp $(NAME) $(ISO_DIR)/boot/
+	@cp grub.cfg $(ISO_DIR)/boot/grub/
+	@grub-mkrescue -o $(ISO) $(ISO_DIR) 2>/dev/null
 
-# Create minimal bootable disk image (requires sudo)
-img: $(NAME)
-	sudo ./create_image.sh
+# Verifie que le kernel est multiboot compliant
+verify: docker-build
+	@$(DOCKER_RUN) grub-file --is-x86-multiboot $(NAME) && echo "Multiboot: OK"
 
-# Run with QEMU (ISO)
+# Lance le kernel dans QEMU
 run: iso
 	qemu-system-i386 -cdrom $(ISO)
 
-# Run with QEMU (disk image)
-run-img: $(IMG)
-	qemu-system-i386 -hda $(IMG)
-
-# Clean object files
+# Nettoyage
 clean:
-	rm -rf $(OBJ_DIR)
+	rm -rf $(OBJ_DIR) $(ISO_DIR)
 
-# Full clean
 fclean: clean
-	rm -f $(NAME) $(ISO) $(IMG)
-	rm -rf $(ISO_DIR)
+	rm -f $(NAME) $(ISO)
 
-# Rebuild
 re: fclean all
