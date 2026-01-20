@@ -30,11 +30,13 @@ OBJS        = $(ASM_SRCS:$(SRC_DIR)/%.s=$(OBJ_DIR)/%.o) \
 
 # **************************************************************************** #
 #                      USER COMMANDS (host)
-
-#   make : compiles kernel via Docker
-#   make iso : compiles + creates bootable ISO
-#   make run : compiles + create ISO + launches QEMU
-
+#
+#   make        : compile the kernel via Docker
+#   make iso    : compile + create a bootable ISO
+#   make run    : compile + ISO + launch QEMU
+#   make verify : check that the kernel is multiboot-compliant
+#   make fclean : clean + remove kernel and ISO
+#   make re     : fclean + recompile everything
 
 DOCKER_IMG  = kfs
 DOCKER      = docker run --rm -v "$$(pwd)":/kfs $(DOCKER_IMG)
