@@ -43,17 +43,17 @@ DOCKER      = docker run --rm -v "$$(pwd)":/kfs $(DOCKER_IMG)
 
 all: _docker_build
 	$(DOCKER)
-	echo "✓ $(NAME)"
+	echo "$(NAME) is done !"
 
 iso: _docker_build
 	$(DOCKER) make _iso
-	echo "✓ $(ISO)"
+	echo "$(ISO) is done !"
 
 run: iso
 	qemu-system-i386 -cdrom $(ISO)
 
 verify: _docker_build
-	$(DOCKER) grub-file --is-x86-multiboot $(NAME) && echo "Multiboot OK"
+	$(DOCKER) grub-file --is-x86-multiboot $(NAME) && echo "Multiboot OK !"
 
 clean:
 	rm -rf $(OBJ_DIR) $(ISO_DIR)
